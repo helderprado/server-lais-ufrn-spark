@@ -1,0 +1,283 @@
+version: "3.7"
+
+x-minio-common: &minio-common
+  image: quay.io/minio/minio:RELEASE.2023-02-22T18-23-45Z
+  command: server --console-address ":9001" http://minio{1...4}/data{1...2}
+  environment:
+    - MINIO_ROOT_USER=admin
+    - MINIO_ROOT_PASSWORD=sample_key
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+    interval: 30s
+    timeout: 20s
+    retries: 3
+  networks:
+    - server
+
+services:
+  # JUPYTER SETTINGS
+
+  jupyterhub:
+    image: helderprado/jupyterhub-stack-server
+    container_name: jupyterhub
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - jupyterhub_data:/srv/jupyterhub
+      - ./jupyterhub/jupyterhub_config.py:/jupyterhub_config.py
+    environment:
+      - DOCKER_JUPYTER_IMAGE=helderprado/jupyterlab-stack-server
+      - DOCKER_NETWORK_NAME=jupyterhub_server
+      - HUB_IP=jupyterhub
+      - GITLAB_AUTH_URL="http://localhost/hub/oauth_callback"
+      - GITLAB_AUTH_ID=a56ea4823f806891e3b2091f5c57420a3db620f8f65152bfeb29756c3871e6ed
+      - GITLAB_AUTH_SECRET=0a0d8627e5e161a790567432d3f7df1c088bb1836a64a68c928e8ee0c44670d8
+      - JUPYTER_ENABLE_LAB="yes"
+      - PYSPARK_SUBMIT_ARGS= --master spark://spark-master:7077 --packages com.amazonaws:aws-java-sdk-bundle:1.11.819,org.apache.hadoop:hadoop-aws:3.2.3 pyspark-shell
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=sample_key
+      - MLFLOW_S3_ENDPOINT_URL=http://minio1:9000
+    labels:
+      - "traefik.enable=true"
+      - "traefik.frontend.rule=Host:localhost"
+    restart: on-failure
+    networks:
+      - server
+
+  # ELASTICSEARCH E KIBANA (BI SOFTWARES)
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.13.0
+    container_name: elasticsearch
+    environment:
+      - node.name=elasticsearch
+      - cluster.name=es-docker-cluster
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - http.cors.enabled=true
+      - http.cors.allow-origin="*"
+      - discovery.type=single-node
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+    networks:
+      - server
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.13.0
+    container_name: kibana
+    ports:
+      - 5601:5601
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+    networks:
+      - server
+
+  # SPARK SETTINGS
+
+  # MASTER
+
+  spark-master:
+    image: helderprado/spark-stack-server
+    hostname: spark-master
+    ports:
+      - "9090:8080"
+      - "7077:7077"
+    volumes:
+      - jupyterhub_data:/home/jovyan/work:rw
+    environment:
+      - SPARK_LOCAL_IP=spark-master
+      - SPARK_WORKLOAD=master
+    networks:
+      - server
+
+  # WORKER A
+
+  spark-worker-a:
+    hostname: spark-worker-a
+    image: helderprado/spark-stack-server
+    ports:
+      - 8081:8081
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_CORES=1
+      - SPARK_WORKER_MEMORY=1G
+      - SPARK_DRIVER_MEMORY=1G
+      - SPARK_EXECUTOR_MEMORY=1G
+      - SPARK_WORKLOAD=worker
+      - SPARK_LOCAL_IP=spark-worker-a
+    volumes:
+      - jupyterhub_data:/home/jovyan/work:rw
+    networks:
+      - server
+
+  # WORKER B
+
+  spark-worker-b:
+    hostname: spark-worker-b
+    image: helderprado/spark-stack-server
+    ports:
+      - 8082:8082
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_CORES=1
+      - SPARK_WORKER_MEMORY=1G
+      - SPARK_DRIVER_MEMORY=1G
+      - SPARK_EXECUTOR_MEMORY=1G
+      - SPARK_WORKLOAD=worker
+      - SPARK_LOCAL_IP=spark-worker-b
+    volumes:
+      - jupyterhub_data:/home/jovyan/work:rw
+    networks:
+      - server
+
+  # MLFLOW
+
+  mlflow:
+    image: helderprado/mlflow-stack-server
+    ports:
+      - "5000:5000"
+    environment:
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=sample_key
+      - AWS_DEFAULT_REGION=us-east-1
+      - MLFLOW_S3_ENDPOINT_URL=http://minio1:9000
+    entrypoint: bash ./wait-for-it.sh db:3306 -t 90 -- mlflow server --backend-store-uri mysql+pymysql://mlflow_user:mlflow_password@db:3306/mlflow --default-artifact-root s3://mlflow/ -h 0.0.0.0
+    networks:
+      - server
+
+  ### BANCOS DE DADOS ################################
+
+  db:
+    image: mysql/mysql-server:5.7.28
+    environment:
+      - MYSQL_DATABASE=mlflow
+      - MYSQL_USER=mlflow_user
+      - MYSQL_PASSWORD=mlflow_password
+      - MYSQL_ROOT_PASSWORD=toor
+    volumes:
+      - db_volume:/var/lib/mysql
+    networks:
+      - server
+
+  postgres:
+    image: postgres:9.6
+    ports:
+      - "15432:5432"
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    volumes:
+      - airflow_db:/var/lib/postgresql/data
+    networks:
+      - server
+
+  ### PROXY REVERSO #################################
+
+  nginx:
+    image: nginx:1.19.2-alpine
+    hostname: nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "19000:9000"
+      - "19001:9001"
+    depends_on:
+      - minio1
+      - minio2
+      - minio3
+      - minio4
+    networks:
+      - server
+
+  reverse-proxy:
+    image: traefik:v1.7.16
+    container_name: reverse-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "18080:8080"
+    volumes:
+      - ./reverse-proxy/traefik.toml:/etc/traefik/traefik.toml
+      - ./reverse-proxy/certs:/etc/certs
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: on-failure
+    networks:
+      - server
+
+  # AIRFLOW SETTINGS
+
+  airflow-webserver:
+    image: helderprado/airflow-stack-server
+    depends_on:
+      - postgres
+    environment:
+      - LOAD_EX=n
+      - EXECUTOR=Local
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=sample_key
+      - AWS_DEFAULT_REGION=us-east-1
+      - PYSPARK_SUBMIT_ARGS= --master spark://spark-master:7077 --packages com.amazonaws:aws-java-sdk-bundle:1.11.819,org.apache.hadoop:hadoop-aws:3.2.3 pyspark-shell
+      - MLFLOW_S3_ENDPOINT_URL=http://minio1:9000
+    volumes:
+      - jupyterhub_data:/usr/local/airflow/dags
+    ports:
+      - "8282:8282"
+    command: webserver
+    networks:
+      - server
+
+  minio1:
+    <<: *minio-common
+    hostname: minio1
+    volumes:
+      - data1-1:/data1
+      - data1-2:/data2
+
+  minio2:
+    <<: *minio-common
+    hostname: minio2
+    volumes:
+      - data2-1:/data1
+      - data2-2:/data2
+
+  minio3:
+    <<: *minio-common
+    hostname: minio3
+    volumes:
+      - data3-1:/data1
+      - data3-2:/data2
+
+  minio4:
+    <<: *minio-common
+    hostname: minio4
+    volumes:
+      - data4-1:/data1
+      - data4-2:/data2
+
+networks:
+  server:
+
+volumes:
+  jupyterhub_data:
+  elasticsearch_data:
+  airflow_db:
+  db_volume:
+  data1-1:
+  data1-2:
+  data2-1:
+  data2-2:
+  data3-1:
+  data3-2:
+  data4-1:
+  data4-2:
