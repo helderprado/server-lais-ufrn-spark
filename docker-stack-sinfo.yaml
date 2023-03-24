@@ -45,52 +45,6 @@ services:
         constraints:
           - node.hostname == helder-linux
 
-  # # ELASTICSEARCH E KIBANA (BI SOFTWARES)
-
-  # elasticsearch:
-  #   image: docker.elastic.co/elasticsearch/elasticsearch:7.13.0
-  #   environment:
-  #     - node.name=elasticsearch
-  #     - cluster.name=es-docker-cluster
-  #     - bootstrap.memory_lock=true
-  #     - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-  #     - http.cors.enabled=true
-  #     - http.cors.allow-origin="*"
-  #     - discovery.type=single-node
-  #   ulimits:
-  #     memlock:
-  #       soft: -1
-  #       hard: -1
-  #   volumes:
-  #     - elasticsearch_data:/usr/share/elasticsearch/data
-  #   ports:
-  #     - 9200:9200
-  #   networks:
-  #     - server
-  #   deploy:
-  #     mode: replicated
-  #     replicas: 1
-  #     placement:
-  #       constraints:
-  #         - node.hostname == helder-linux
-
-  # kibana:
-  #   image: docker.elastic.co/kibana/kibana:7.13.0
-  #   hostname: kibana
-  #   ports:
-  #     - 5601:5601
-  #   environment:
-  #     ELASTICSEARCH_URL: http://elasticsearch:9200
-  #     ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
-  #   networks:
-  #     - server
-  #   deploy:
-  #     mode: replicated
-  #     replicas: 1
-  #     placement:
-  #       constraints:
-  #         - node.hostname == helder-linux
-
   # SPARK SETTINGS
 
   # MASTER
@@ -101,8 +55,6 @@ services:
     ports:
       - "7077:7077"
       - "9090:8080"
-    # volumes:
-    #   - jupyterhub_data:/home/jovyan/work:rw
     environment:
       - SPARK_LOCAL_IP=spark-master
       - SPARK_WORKLOAD=master
@@ -133,8 +85,6 @@ services:
       - SPARK_EXECUTOR_MEMORY=8GB
       - SPARK_WORKLOAD=worker
       - SPARK_LOCAL_IP=spark-worker-a
-    # volumes:
-    #   - jupyterhub_data:/home/jovyan/work:rw
     networks:
       - server
     deploy:
@@ -173,32 +123,32 @@ services:
 
   # # WORKER C
 
-  # # spark-worker-c:
-  # #   hostname: spark-worker-c
-  # #   image: helderprado/spark-stack-server
-  # #   ports:
-  # #     - "9093:8080"
-  # #     - "7002:7000"
-  # #   depends_on:
-  # #     - spark-master
-  # #   environment:
-  # #     - SPARK_MASTER=spark://spark-master:7077
-  # #     - SPARK_WORKER_CORES=1
-  # #     - SPARK_WORKER_MEMORY=2GB
-  # #     - SPARK_DRIVER_MEMORY=2GB
-  # #     - SPARK_EXECUTOR_MEMORY=2GB
-  # #     - SPARK_WORKLOAD=worker
-  # #     - SPARK_LOCAL_IP=spark-worker-c
-  # #   volumes:
-  # #     - jupyterhub_data:/home/jovyan/work:rw
-  # #   networks:
-  # #     - server
-  # # deploy:
-  # #   mode: replicated
-  # #   replicas: 1
-  # #   placement:
-  # #     constraints:
-  # #       - node.hostname == node3.lais.ufrn.br
+  # spark-worker-c:
+  #   hostname: spark-worker-c
+  #   image: helderprado/spark-stack-server
+  #   ports:
+  #     - "9093:8080"
+  #     - "7002:7000"
+  #   depends_on:
+  #     - spark-master
+  #   environment:
+  #     - SPARK_MASTER=spark://spark-master:7077
+  #     - SPARK_WORKER_CORES=1
+  #     - SPARK_WORKER_MEMORY=2GB
+  #     - SPARK_DRIVER_MEMORY=2GB
+  #     - SPARK_EXECUTOR_MEMORY=2GB
+  #     - SPARK_WORKLOAD=worker
+  #     - SPARK_LOCAL_IP=spark-worker-c
+  #   volumes:
+  #     - jupyterhub_data:/home/jovyan/work:rw
+  #   networks:
+  #     - server
+  # deploy:
+  #   mode: replicated
+  #   replicas: 1
+  #   placement:
+  #     constraints:
+  #       - node.hostname == node3.lais.ufrn.br
 
   # # MLFLOW
 
@@ -399,42 +349,42 @@ services:
         constraints:
           - node.hostname == helder-linux
 
-  # agent:
-  #   image: portainer/agent
-  #   environment:
-  #     # REQUIRED: Should be equal to the service name prefixed by "tasks." when
-  #     # deployed inside an overlay network
-  #     AGENT_CLUSTER_ADDR: tasks.agent
-  #     # AGENT_PORT: 9001
-  #     # LOG_LEVEL: debug
-  #   volumes:
-  #     - /var/run/docker.sock:/var/run/docker.sock
-  #     - /var/lib/docker/volumes:/var/lib/docker/volumes
-  #   networks:
-  #     - server
-  #   deploy:
-  #     mode: replicated
-  #     replicas: 1
-  #     placement:
-  #       constraints:
-  #         - node.hostname == helder-linux
+  agent:
+    image: portainer/agent
+    environment:
+      # REQUIRED: Should be equal to the service name prefixed by "tasks." when
+      # deployed inside an overlay network
+      AGENT_CLUSTER_ADDR: tasks.agent
+      # AGENT_PORT: 9001
+      # LOG_LEVEL: debug
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/volumes:/var/lib/docker/volumes
+    networks:
+      - server
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == helder-linux
 
-  # portainer:
-  #   image: portainer/portainer
-  #   command: -H tcp://tasks.agent:9001 --tlsskipverify
-  #   ports:
-  #     - "29000:9000"
-  #     - "28000:8000"
-  #   volumes:
-  #     - portainer_data:/data
-  #   networks:
-  #     - server
-  #   deploy:
-  #     mode: replicated
-  #     replicas: 1
-  #     placement:
-  #       constraints:
-  #         - node.hostname == helder-linux
+  portainer:
+    image: portainer/portainer
+    command: -H tcp://tasks.agent:9001 --tlsskipverify
+    ports:
+      - "29000:9000"
+      - "28000:8000"
+    volumes:
+      - portainer_data:/data
+    networks:
+      - server
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == helder-linux
 
 networks:
   server:
